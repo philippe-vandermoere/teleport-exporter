@@ -1,0 +1,6 @@
+/bin/
+/dist/
+.claude/
+*.test
+test/e2e/.terraform/
+test/e2e/terraform.tfstate*
