@@ -1,0 +1,237 @@
+suite: deployment
+templates:
+  - deployment.yaml
+  - configmap.yaml
+set:
+  teleport.address: teleport.example.com:443
+  tbot.token: teleport-exporter-bot
+tests:
+  - it: fails without teleport.address
+    template: deployment.yaml
+    set:
+      teleport.address: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: "teleport.address is required (host:port of the Teleport proxy)"
+
+  - it: fails without tbot.token when tbot is enabled
+    template: deployment.yaml
+    set:
+      tbot.token: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: "tbot.token is required when tbot.enabled is true"
+
+  - it: runs tbot as a native sidecar
+    template: deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: tbot
+      - equal:
+          path: spec.template.spec.initContainers[0].restartPolicy
+          value: Always
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: public.ecr.aws/gravitational/tbot-distroless:18.10.0
+
+  - it: probes tbot's diag endpoint, startup probe included
+    template: deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[0].ports
+          content:
+            name: diag
+            containerPort: 3001
+            protocol: TCP
+      - equal:
+          path: spec.template.spec.initContainers[0].startupProbe.httpGet
+          value:
+            path: /readyz
+            port: diag
+      - equal:
+          path: spec.template.spec.initContainers[0].livenessProbe.httpGet
+          value:
+            path: /livez
+            port: diag
+      - equal:
+          path: spec.template.spec.initContainers[0].readinessProbe.httpGet
+          value:
+            path: /readyz
+            port: diag
+
+  - it: can disable tbot's startup probe
+    template: deployment.yaml
+    set:
+      tbot.startupProbe.enabled: false
+    asserts:
+      - notExists:
+          path: spec.template.spec.initContainers[0].startupProbe
+
+  - it: enables tbot's diag endpoint on the probed port
+    template: configmap.yaml
+    set:
+      tbot.diag.port: 4000
+    asserts:
+      - matchRegex:
+          path: data["tbot.yaml"]
+          pattern: 'diag_addr: "0\.0\.0\.0:4000"'
+
+  - it: joins with the kubernetes join method and the configured token
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["tbot.yaml"]
+          pattern: 'join_method: kubernetes\n\s+token: "teleport-exporter-bot"'
+      - matchRegex:
+          path: data["tbot.yaml"]
+          pattern: 'proxy_server: "teleport.example.com:443"'
+      - notMatchRegex:
+          path: data["tbot.yaml"]
+          pattern: insecure
+
+  - it: points tbot at the projected token
+    template: deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: KUBERNETES_TOKEN_PATH
+            value: /var/run/secrets/tokens/join-sa-token
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+
+  - it: defaults the token audience to the host of teleport.address
+    template: deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: join-sa-token
+            projected:
+              sources:
+                - serviceAccountToken:
+                    path: join-sa-token
+                    audience: teleport.example.com
+                    expirationSeconds: 600
+
+  - it: uses teleport.clusterName as the token audience when set
+    template: deployment.yaml
+    set:
+      teleport.clusterName: my-cluster
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[2].projected.sources[0].serviceAccountToken.audience
+          value: my-cluster
+
+  - it: shares an in-memory identity volume, read-only for the exporter
+    template: deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: identity
+            emptyDir:
+              medium: Memory
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: identity
+            mountPath: /var/run/teleport-identity
+            readOnly: true
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TELEPORT_EXPORTER_IDENTITY_FILE
+            value: /var/run/teleport-identity/identity
+
+  - it: passes the address to the exporter
+    template: deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TELEPORT_EXPORTER_ADDRESS
+            value: teleport.example.com:443
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TELEPORT_EXPORTER_INSECURE
+            value: "true"
+
+  - it: propagates teleport.insecure to both tbot and the exporter
+    set:
+      teleport.insecure: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TELEPORT_EXPORTER_INSECURE
+            value: "true"
+        template: deployment.yaml
+      - matchRegex:
+          path: data["tbot.yaml"]
+          pattern: "insecure: true"
+        template: configmap.yaml
+
+  - it: rolls the pod when the tbot config changes
+    template: deployment.yaml
+    asserts:
+      - exists:
+          path: spec.template.metadata.annotations["checksum/tbot-config"]
+
+  - it: mounts the identity Secret instead of running tbot when tbot is disabled
+    template: deployment.yaml
+    set:
+      tbot.enabled: false
+      tbot.token: ""
+      identity.existingSecret: my-identity
+      identity.key: id
+    asserts:
+      - notExists:
+          path: spec.template.spec.initContainers
+      - equal:
+          path: spec.template.spec.volumes
+          value:
+            - name: identity
+              secret:
+                secretName: my-identity
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: TELEPORT_EXPORTER_IDENTITY_FILE
+            value: /var/run/teleport-identity/id
+
+  - it: does not render the tbot ConfigMap when tbot is disabled
+    template: configmap.yaml
+    set:
+      tbot.enabled: false
+      identity.existingSecret: my-identity
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: fails without identity.existingSecret when tbot is disabled
+    template: deployment.yaml
+    set:
+      tbot.enabled: false
+    asserts:
+      - failedTemplate:
+          errorMessage: "identity.existingSecret is required when tbot.enabled is false"
+
+  - it: supports Helm templating in the address and token
+    set:
+      teleport.address: "{{ .Release.Name }}.example.com:443"
+      tbot.token: "{{ .Release.Name }}-bot"
+    release:
+      name: prod
+    asserts:
+      - matchRegex:
+          path: data["tbot.yaml"]
+          pattern: 'token: "prod-bot"'
+        template: configmap.yaml
+      - equal:
+          path: spec.template.spec.volumes[2].projected.sources[0].serviceAccountToken.audience
+          value: prod.example.com
+        template: deployment.yaml

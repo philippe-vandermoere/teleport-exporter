@@ -1,0 +1,182 @@
+# teleport-exporter
+
+Helm chart for [teleport-exporter](https://github.com/philippe-vandermoere/teleport-exporter),
+a Prometheus exporter for the Teleport inventory (SSH nodes, Kubernetes
+clusters, databases, applications).
+
+## Installing
+
+Create the Teleport role, bot and join token first (see below), then:
+
+```
+helm install teleport-exporter oci://ghcr.io/philippe-vandermoere/charts/teleport-exporter \
+  --version <version> --namespace monitoring \
+  --set teleport.address=teleport.example.com:443 \
+  --set tbot.token=teleport-exporter-bot
+```
+
+See [CHANGELOG.md](CHANGELOG.md) for this chart's release history (the
+exporter image itself has its own, [../../CHANGELOG.md](../../CHANGELOG.md)).
+
+## Creating the Teleport bot and join token
+
+Run the following with `tctl`, as a Teleport user allowed to manage roles,
+bots and tokens.
+
+### 1. The role
+
+Read-only access to nodes, Kubernetes clusters, databases, applications and
+the cluster name. The label matchers are required: without them, the list
+calls succeed but return nothing.
+
+```yaml
+kind: role
+version: v7
+metadata:
+  name: teleport-exporter
+spec:
+  allow:
+    node_labels:
+      "*": "*"
+    kubernetes_labels:
+      "*": "*"
+    db_labels:
+      "*": "*"
+    app_labels:
+      "*": "*"
+    rules:
+      - resources:
+          - node
+          - kube_server
+          - kube_cluster
+          - db_server
+          - db
+          - app_server
+          - app
+          - cluster_name
+        verbs:
+          - list
+          - read
+```
+
+```
+tctl create -f role.yaml
+```
+
+### 2. The bot
+
+```
+tctl bots add teleport-exporter --roles=teleport-exporter
+```
+
+Ignore the one-time join token `tctl` prints: the bot joins with the
+`kubernetes` token below instead.
+
+### 3. The join token
+
+The `service_account` to allow is `<release namespace>:<ServiceAccount
+name>`. The ServiceAccount is named after the release (`teleport-exporter`
+for a release named `teleport-exporter`, otherwise
+`<release>-teleport-exporter`), or `serviceAccount.name` if set.
+
+**`static_jwks`**, when Teleport can't reach the Kubernetes cluster's OIDC
+issuer (typical on-premises). Paste the output of
+`kubectl get --raw /openid/v1/jwks` into the token, and update it whenever
+the cluster's signing keys rotate:
+
+```yaml
+kind: token
+version: v2
+metadata:
+  name: teleport-exporter-bot
+spec:
+  roles: [Bot]
+  bot_name: teleport-exporter
+  join_method: kubernetes
+  kubernetes:
+    type: static_jwks
+    static_jwks:
+      jwks: |
+        {"keys":[...]}
+    allow:
+      - service_account: "monitoring:teleport-exporter"
+```
+
+**`oidc`**, when the cluster's ServiceAccount issuer is publicly reachable
+(EKS, GKE, AKS...). Teleport fetches the signing keys itself, so key
+rotation needs no update. The issuer is
+`kubectl get --raw /.well-known/openid-configuration | jq -r .issuer`:
+
+```yaml
+kind: token
+version: v2
+metadata:
+  name: teleport-exporter-bot
+spec:
+  roles: [Bot]
+  bot_name: teleport-exporter
+  join_method: kubernetes
+  kubernetes:
+    type: oidc
+    oidc:
+      issuer: https://oidc.eks.eu-west-1.amazonaws.com/id/EXAMPLE
+    allow:
+      - service_account: "monitoring:teleport-exporter"
+```
+
+```
+tctl create -f token.yaml
+```
+
+Then install the chart with `tbot.token=teleport-exporter-bot`.
+
+## How it authenticates: the tbot sidecar
+
+The pod runs two containers sharing an in-memory `emptyDir`:
+
+- `tbot` (Teleport Machine ID), declared as a
+  [native sidecar](https://kubernetes.io/docs/concepts/workloads/pods/sidecar-containers/)
+  (an init container with `restartPolicy: Always`, hence Kubernetes ≥ 1.29).
+  It joins Teleport with the `kubernetes` join method, presenting a
+  projected ServiceAccount token, and keeps a short-lived identity file
+  renewed in the shared volume. Its diagnostics endpoint is enabled
+  (`tbot.diag.port`) and backs its startup, liveness and readiness probes:
+  the exporter container only starts once the startup probe passes, i.e.
+  once the first identity file has been written.
+- `teleport-exporter`, which reads that identity file (re-read before every
+  collection, so renewals are picked up without a restart).
+
+Both `static_jwks` and `oidc` token types work with the same chart values:
+they only differ in how the Teleport join token validates the
+ServiceAccount token, see the project README. Either way, the token's
+`spec.kubernetes.allow` must list this release's ServiceAccount
+(`<namespace>:<serviceAccount name>`, printed by `helm install`'s notes).
+
+The projected token's audience must be the Teleport cluster name. It
+defaults to the host part of `teleport.address` (`teleport.example.com:443`
+→ `teleport.example.com`), the cluster name in the common case; set
+`teleport.clusterName` when they differ (`tctl status` shows the cluster
+name).
+
+Without tbot (`tbot.enabled: false`), point `identity.existingSecret` at a
+Secret holding an identity file (key `identity.key`, `identity` by default),
+for instance one written by a tbot running elsewhere with a
+`kubernetes_secret` destination. Renewing it is then up to you.
+
+Naming fields (`nameOverride`, `fullnameOverride`, `serviceAccount.name`),
+`teleport.address`/`teleport.clusterName`, `tbot.token`,
+`identity.existingSecret` and `extraArgs`/`extraEnv`/`extraVolumes`/
+`extraVolumeMounts` are all passed through Helm's `tpl`, so they may contain
+template expressions evaluated against the release.
+
+## Prometheus Operator integration
+
+`serviceMonitor.enabled` is `false` by default, since the
+`monitoring.coreos.com` CRDs aren't guaranteed to be installed in every
+target cluster. Set it to `true` (and optionally `serviceMonitor.labels` to
+match your Prometheus Operator's `serviceMonitorSelector`) to register a
+`ServiceMonitor`.
+
+## Values
+
+{{ template "chart.valuesTable" . }}

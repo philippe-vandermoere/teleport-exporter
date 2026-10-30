@@ -1,0 +1,8 @@
+teleport:
+  address: teleport.example.com:443
+
+tbot:
+  token: teleport-exporter-bot
+
+serviceMonitor:
+  enabled: true

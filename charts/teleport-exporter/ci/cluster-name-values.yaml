@@ -1,0 +1,11 @@
+teleport:
+  address: proxy.example.com:3080
+  clusterName: example-cluster
+  insecure: true
+
+tbot:
+  token: teleport-exporter-bot
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi

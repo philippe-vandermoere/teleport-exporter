@@ -1,0 +1,8 @@
+teleport:
+  address: teleport.example.com:443
+
+tbot:
+  enabled: false
+
+identity:
+  existingSecret: teleport-exporter-identity

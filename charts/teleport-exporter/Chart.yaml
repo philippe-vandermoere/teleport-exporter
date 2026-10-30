@@ -1,0 +1,19 @@
+apiVersion: v2
+name: teleport-exporter
+description: Prometheus exporter for the Teleport inventory (SSH nodes, Kubernetes clusters, databases, applications), authenticated by a tbot sidecar
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.29.0-0"
+home: https://github.com/philippe-vandermoere/teleport-exporter
+sources:
+  - https://github.com/philippe-vandermoere/teleport-exporter
+keywords:
+  - prometheus
+  - teleport
+  - tbot
+  - monitoring
+  - exporter
+maintainers:
+  - name: philippe-vandermoere
+    url: https://github.com/philippe-vandermoere

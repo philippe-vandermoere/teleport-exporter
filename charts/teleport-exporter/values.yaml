@@ -1,0 +1,245 @@
+image:
+  # -- Image repository.
+  repository: ghcr.io/philippe-vandermoere/teleport-exporter
+  # -- Image tag. Defaults to the chart's appVersion if unset.
+  tag: ""
+  # -- Image pull policy.
+  pullPolicy: IfNotPresent
+
+# -- Image pull secrets, for private registries.
+imagePullSecrets: []
+
+# -- Override the chart name used to build object names (see `fullnameOverride`
+# for the common case of controlling the whole name directly). Supports Helm
+# templating, e.g. `"{{ .Release.Namespace }}"`.
+nameOverride: ""
+
+# -- Override the fully qualified object name entirely (otherwise built from
+# the release name and chart name). Supports Helm templating.
+fullnameOverride: ""
+
+teleport:
+  # -- (required) Teleport proxy address, as `host:port` (e.g.
+  # `teleport.example.com:443`). Used both by tbot to join and renew its
+  # identity, and by the exporter to query the inventory. Supports Helm
+  # templating.
+  address: ""
+  # -- Teleport cluster name, used as the audience of the projected
+  # ServiceAccount token tbot joins with (Teleport rejects any other
+  # audience). Defaults to the host part of `teleport.address`
+  # (`teleport.example.com:443` → `teleport.example.com`), which matches the
+  # cluster name in the common case; set it when they differ (`tctl status`
+  # shows the cluster name). Supports Helm templating.
+  clusterName: ""
+  # -- Skip TLS verification of the proxy's web certificate (self-signed
+  # test clusters only). Applies to both tbot and the exporter.
+  insecure: false
+
+config:
+  # -- Value for `TELEPORT_EXPORTER_LISTEN_ADDRESS`. Its port must match
+  # `service.port`.
+  listenAddress: ":9180"
+  # -- Value for `TELEPORT_EXPORTER_REFRESH_INTERVAL`: how often the
+  # inventory is collected from Teleport in the background (scrapes are
+  # served from the last collection).
+  refreshInterval: "30s"
+  # -- Value for `TELEPORT_EXPORTER_COLLECT_TIMEOUT`: upper bound for one
+  # whole collection.
+  collectTimeout: "20s"
+
+tbot:
+  # -- Run a tbot sidecar that joins Teleport with the pod's ServiceAccount
+  # (`kubernetes` join method, `static_jwks` or `oidc` token type — see the
+  # project README to create the bot and its token) and keeps a short-lived
+  # identity file renewed for the exporter. When false, `identity.existingSecret`
+  # must hold an identity file instead.
+  enabled: true
+  image:
+    # -- tbot image repository.
+    repository: public.ecr.aws/gravitational/tbot-distroless
+    # -- tbot image tag. Keep it on the same major version as the Teleport cluster.
+    tag: "18.10.0"
+    # -- tbot image pull policy.
+    pullPolicy: IfNotPresent
+  # -- (required when `tbot.enabled`) Name of the Teleport join token (a
+  # `kind: token` with `join_method: kubernetes`) the bot joins with.
+  # Supports Helm templating.
+  token: ""
+  # -- TTL of the certificates tbot issues.
+  certificateTTL: 1h
+  # -- How often tbot renews its certificates. Must be shorter than
+  # `tbot.certificateTTL`.
+  renewalInterval: 20m
+  # -- Lifetime of the projected ServiceAccount token tbot joins with.
+  # Kubernetes rotates it automatically; 600 is the minimum Kubernetes accepts.
+  serviceAccountTokenExpirationSeconds: 600
+  diag:
+    # -- Port of tbot's diagnostics endpoint (`/livez`, `/readyz`), used by
+    # its probes below.
+    port: 3001
+  # -- Startup probe on tbot's `/readyz`. tbot runs as a native sidecar
+  # (an init container with `restartPolicy: Always`): the exporter container
+  # only starts once this probe passes, i.e. once the first identity file
+  # has been written.
+  startupProbe:
+    enabled: true
+    httpGet:
+      path: /readyz
+      port: diag
+    periodSeconds: 2
+    timeoutSeconds: 2
+    failureThreshold: 60
+  # -- Liveness probe on tbot's `/livez`.
+  livenessProbe:
+    enabled: true
+    httpGet:
+      path: /livez
+      port: diag
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # -- Readiness probe on tbot's `/readyz`: not ready while tbot fails to
+  # renew its identity.
+  readinessProbe:
+    enabled: true
+    httpGet:
+      path: /readyz
+      port: diag
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # -- Resource requests/limits for the tbot container.
+  resources: {}
+  # -- Extra environment variables for the tbot container. Supports Helm
+  # templating.
+  extraEnv: []
+
+identity:
+  # -- Name of an existing Secret holding a Teleport identity file, used
+  # instead of tbot when `tbot.enabled` is false (you are then responsible
+  # for renewing it). Supports Helm templating.
+  existingSecret: ""
+  # -- Key within `identity.existingSecret` holding the identity file.
+  key: identity
+
+controller:
+  # -- Replica count. Each replica runs its own tbot and queries Teleport
+  # independently; more than one only adds load on the Teleport API.
+  replicas: 1
+  # -- Node selector.
+  nodeSelector: {}
+  # -- Tolerations.
+  tolerations: []
+  # -- Affinity rules.
+  affinity: {}
+  # -- Annotations for the Deployment object itself.
+  annotations: {}
+  # -- Annotations for the pod template.
+  podAnnotations: {}
+  # -- Labels for the pod template.
+  podLabels: {}
+  # -- Resource requests/limits for the exporter container.
+  resources: {}
+  # -- Pod-level securityContext, shared by the exporter and tbot. Both
+  # read/write the identity volume as this UID/GID.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65535
+    runAsGroup: 65535
+    fsGroup: 65535
+  # -- Container-level securityContext, applied to both the exporter and tbot.
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+  # -- Deployment `strategy`.
+  updateStrategy: {}
+
+serviceAccount:
+  # -- Create a ServiceAccount. Its identity (`<namespace>:<name>`) is what
+  # the Teleport join token allows (`spec.kubernetes.allow`). No RBAC is
+  # attached: neither the exporter nor tbot call the Kubernetes API.
+  create: true
+  # -- Name of the ServiceAccount to use. Defaults to the chart's fullname
+  # when `create` is true. Supports Helm templating.
+  name: ""
+  # -- Annotations for the ServiceAccount.
+  annotations: {}
+
+service:
+  # -- Service port (and the exporter's listen port, see `config.listenAddress`).
+  port: 9180
+  # -- Annotations for the Service.
+  annotations: {}
+
+serviceMonitor:
+  # -- Create a Prometheus Operator ServiceMonitor. Disabled by default: the
+  # `monitoring.coreos.com` CRDs aren't guaranteed to be installed in every
+  # target cluster.
+  enabled: false
+  # -- Namespace for the ServiceMonitor. Defaults to the release namespace.
+  namespace: ""
+  # -- Scrape interval.
+  interval: 30s
+  # -- Scrape timeout.
+  scrapeTimeout: 10s
+  # -- Extra labels, so the ServiceMonitor matches your Prometheus Operator's
+  # `serviceMonitorSelector`.
+  labels: {}
+  # -- `relabelings` on the scrape endpoint.
+  relabelings: []
+  # -- `metricRelabelings` on the scrape endpoint.
+  metricRelabelings: []
+
+# -- Extra command-line args for the exporter binary. Rendered through Helm
+# templating as a whole, so any entry may contain expressions like
+# `"{{ .Release.Name }}"`.
+extraArgs: []
+
+# -- Extra environment variables for the exporter container. Supports Helm
+# templating (see `extraArgs` above).
+extraEnv: []
+
+# -- Extra volumes. Supports Helm templating (see `extraArgs` above).
+extraVolumes: []
+# -- Extra volume mounts for the exporter container, paired with
+# `extraVolumes`. Supports Helm templating.
+extraVolumeMounts: []
+
+livenessProbe:
+  # -- Enable the exporter's liveness probe.
+  enabled: true
+  httpGet:
+    # -- Path the probe checks. `/` rather than `/metrics`: it answers
+    # without touching the collector, so a Teleport outage never restarts
+    # the exporter (it shows up as `teleport_exporter_up 0` instead).
+    path: /
+    # -- Port the probe checks (the container port name).
+    port: http
+  # -- Seconds before the first probe.
+  initialDelaySeconds: 5
+  # -- Seconds between probes.
+  periodSeconds: 30
+  # -- Probe timeout in seconds.
+  timeoutSeconds: 5
+  # -- Consecutive failures before the container is considered unhealthy.
+  failureThreshold: 3
+
+readinessProbe:
+  # -- Enable the exporter's readiness probe.
+  enabled: true
+  httpGet:
+    # -- Path the probe checks. See the comment on livenessProbe.httpGet.path
+    # above — kept as `/`, not `/metrics`, for the same reason.
+    path: /
+    # -- Port the probe checks (the container port name).
+    port: http
+  # -- Seconds before the first probe.
+  initialDelaySeconds: 5
+  # -- Seconds between probes.
+  periodSeconds: 10
+  # -- Probe timeout in seconds.
+  timeoutSeconds: 5
+  # -- Consecutive failures before the pod is removed from Service endpoints.
+  failureThreshold: 3
