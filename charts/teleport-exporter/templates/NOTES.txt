@@ -1,0 +1,21 @@
+teleport-exporter has been deployed, querying Teleport at {{ include "teleport-exporter.address" . }}.
+{{- if .Values.tbot.enabled }}
+
+Its tbot sidecar joins with token "{{ include "teleport-exporter.render" (dict "value" .Values.tbot.token "context" $) }}" as ServiceAccount
+"{{ .Release.Namespace }}:{{ include "teleport-exporter.serviceAccountName" . }}" (projected token audience: "{{ include "teleport-exporter.clusterName" . }}").
+The token's spec.kubernetes.allow must list that ServiceAccount — see the project README.
+{{- end }}
+
+Metrics endpoint (from inside the cluster):
+  http://{{ include "teleport-exporter.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}/metrics
+
+Check it locally with:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "teleport-exporter.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  curl -s http://localhost:{{ .Values.service.port }}/metrics | grep teleport_exporter_up
+
+{{- if not .Values.serviceMonitor.enabled }}
+
+serviceMonitor.enabled is false: nothing is registered with the Prometheus
+Operator. Set --set serviceMonitor.enabled=true (and ensure the
+monitoring.coreos.com CRDs are installed) to enable it.
+{{- end }}

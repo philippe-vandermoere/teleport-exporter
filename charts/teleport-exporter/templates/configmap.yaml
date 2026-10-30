@@ -1,0 +1,29 @@
+{{- if .Values.tbot.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "teleport-exporter.fullname" . }}-tbot
+  labels:
+    {{- include "teleport-exporter.labels" . | nindent 4 }}
+data:
+  tbot.yaml: |
+    version: v2
+    proxy_server: {{ include "teleport-exporter.address" . | quote }}
+    {{- if .Values.teleport.insecure }}
+    insecure: true
+    {{- end }}
+    onboarding:
+      join_method: kubernetes
+      token: {{ required "tbot.token is required when tbot.enabled is true" (include "teleport-exporter.render" (dict "value" .Values.tbot.token "context" $)) | quote }}
+    storage:
+      type: memory
+    credential_ttl: {{ .Values.tbot.certificateTTL | quote }}
+    renewal_interval: {{ .Values.tbot.renewalInterval | quote }}
+    diag_addr: {{ printf "0.0.0.0:%v" .Values.tbot.diag.port | quote }}
+    services:
+      - type: identity
+        destination:
+          type: directory
+          path: {{ include "teleport-exporter.identityDir" . }}
+          acls: "off"
+{{- end }}

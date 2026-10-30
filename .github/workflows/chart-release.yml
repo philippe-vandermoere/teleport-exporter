@@ -1,0 +1,25 @@
+name: Chart Release
+
+on:
+  push:
+    tags:
+      - "chart-v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - run: curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-4 | bash
+        shell: bash
+      - run: helm lint charts/teleport-exporter -f charts/teleport-exporter/ci/default-values.yaml
+      - run: helm package charts/teleport-exporter --destination dist
+      - name: Login to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io \
+            --username ${{ github.actor }} --password-stdin
+      - name: Push chart
+        run: |
+          helm push dist/teleport-exporter-*.tgz oci://ghcr.io/${{ github.repository_owner }}/charts
