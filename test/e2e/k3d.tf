@@ -19,6 +19,15 @@ resource "k3d_cluster" "e2e" {
       name      = "registry.localhost"
       host_port = tostring(var.registry_host_port)
     }
+
+    config = yamlencode({
+      mirrors = {
+        "public.ecr.aws" = {
+          endpoint = ["https://ghcr.io"]
+          rewrite  = { "^gravitational/(.*)" = "philippe-vandermoere/$1" }
+        }
+      }
+    })
   }
 
   kubeconfig {

@@ -33,8 +33,3 @@ variable "terraform_join_token" {
   type        = string
   default     = "terraform"
 }
-
-variable "kubernetes_token_path" {
-  description = "Where the Teleport provider's ServiceAccount token is written. Must match the KUBERNETES_TOKEN_PATH environment variable Terraform runs with (see run.sh)."
-  type        = string
-}

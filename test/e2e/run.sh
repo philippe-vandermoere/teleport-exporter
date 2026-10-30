@@ -8,10 +8,8 @@ cd "$(dirname "$0")"
 WORK_DIR=$(mktemp -d)
 
 # The Teleport provider joins as a bot with the kubernetes join method and
-# reads its ServiceAccount token from here; Terraform writes it (see
-# teleport.tf).
+# reads its ServiceAccount token from here (see teleport.tf).
 export KUBERNETES_TOKEN_PATH="$WORK_DIR/terraform-sa-token"
-export TF_VAR_kubernetes_token_path="$KUBERNETES_TOKEN_PATH"
 export TF_IN_AUTOMATION=1
 export KUBECONFIG="$WORK_DIR/kubeconfig"
 
@@ -21,7 +19,7 @@ cleanup() {
     if [ -n "$PORT_FORWARD_PID" ]; then kill "$PORT_FORWARD_PID" 2>/dev/null || true; fi
     if [ "${KEEP:-0}" = "1" ]; then
         echo "--- KEEP=1: leaving the environment up. To use it, then remove it: ---"
-        echo "export KUBECONFIG=$KUBECONFIG KUBERNETES_TOKEN_PATH=$KUBERNETES_TOKEN_PATH TF_VAR_kubernetes_token_path=$KUBERNETES_TOKEN_PATH"
+        echo "export KUBECONFIG=$KUBECONFIG KUBERNETES_TOKEN_PATH=$KUBERNETES_TOKEN_PATH"
         echo "terraform -chdir=$PWD destroy && rm -r $WORK_DIR"
         return
     fi
@@ -47,13 +45,37 @@ remove_k3d_cluster() {
 
 fail() {
     echo "FAILED: $1"
-    kubectl get pods -A || true
+    write_kubeconfig
+    kubectl get pods -A -o wide || true
+    for namespace in teleport e2e; do
+        echo "--- $namespace events ---"
+        kubectl -n "$namespace" get events --sort-by=.lastTimestamp || true
+        echo "--- $namespace pods not ready ---"
+        kubectl -n "$namespace" get pods --no-headers 2>/dev/null | awk '{ split($2, r, "/"); if (r[1] != r[2]) print $1 }' |
+            while read -r pod; do
+                kubectl -n "$namespace" describe pod "$pod" | tail -30 || true
+                kubectl -n "$namespace" logs "$pod" --all-containers --tail=50 || true
+            done
+    done
     for target in e2e/deploy/teleport-exporter teleport/deploy/teleport-auth teleport/deploy/teleport-proxy; do
         echo "--- $target logs ---"
         kubectl -n "${target%%/*}" logs "${target#*/}" --all-containers --tail=50 || true
     done
     echo "--- last metrics ---"; metrics | grep '^teleport_' || true
     exit 1
+}
+
+# write_kubeconfig writes the k3d cluster's kubeconfig, if not done yet.
+# Terraform records the output as soon as the cluster exists, even when the
+# rest of the apply then fails, so a failure can always be diagnosed.
+write_kubeconfig() {
+    [ -s "$KUBECONFIG" ] || (umask 077 && terraform output -raw kubeconfig > "$KUBECONFIG") 2>/dev/null || true
+}
+
+# tf_apply [ARG...] runs terraform apply, failing the test (with the
+# cluster's diagnostics) if it fails.
+tf_apply() {
+    terraform apply -auto-approve -input=false -no-color "$@" || fail "terraform apply $*"
 }
 
 # wait_for DESCRIPTION TIMEOUT COMMAND [ARG...] runs COMMAND every second
@@ -91,9 +113,10 @@ echo "--- terraform apply: k3d, Teleport, 2 SSH nodes, 2 k3s clusters, the expor
 terraform init -input=false -no-color >/dev/null
 # The Teleport provider joins the cluster as soon as it is configured (at
 # plan time), so Teleport and the provider's join token come first.
-terraform apply -auto-approve -input=false -no-color -target=local_sensitive_file.terraform_token
-(umask 077 && terraform output -raw kubeconfig > "$KUBECONFIG")
-terraform apply -auto-approve -input=false -no-color
+tf_apply -target=kubernetes_token_request_v1.terraform
+(umask 077 && terraform output -raw terraform_sa_token > "$KUBERNETES_TOKEN_PATH")
+tf_apply
+write_kubeconfig
 
 kubectl -n e2e port-forward svc/teleport-exporter 9180:9180 >/dev/null 2>&1 &
 PORT_FORWARD_PID=$!

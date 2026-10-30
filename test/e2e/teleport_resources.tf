@@ -6,7 +6,7 @@ resource "kubernetes_namespace_v1" "e2e" {
 
 # The exporter's role: the same one the README documents.
 resource "teleport_role" "exporter" {
-  depends_on = [local_sensitive_file.terraform_token]
+  depends_on = [kubernetes_token_request_v1.terraform]
 
   version = "v7"
   metadata = {
@@ -69,7 +69,7 @@ resource "teleport_provision_token" "exporter" {
 # and Kubernetes agents: the auth service validates
 # their pod's own ServiceAccount token with a TokenReview, no secret involved.
 resource "teleport_provision_token" "agents" {
-  depends_on = [local_sensitive_file.terraform_token]
+  depends_on = [kubernetes_token_request_v1.terraform]
 
   version = "v2"
   metadata = {

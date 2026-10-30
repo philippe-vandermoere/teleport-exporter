@@ -120,8 +120,8 @@ resource "kubernetes_service_v1" "teleport_auth_external" {
 # The provider joins natively as the "terraform" bot with the kubernetes
 # join method. Teleport only accepts pod-bound ServiceAccount tokens, so the
 # token is requested for a pause pod running as the "terraform"
-# ServiceAccount, and written where the provider reads it
-# (KUBERNETES_TOKEN_PATH, exported by run.sh).
+# ServiceAccount. run.sh writes it, from the terraform_sa_token output, where
+# the provider reads it (KUBERNETES_TOKEN_PATH).
 
 resource "kubernetes_service_account_v1" "terraform" {
   metadata {
@@ -147,7 +147,13 @@ resource "kubernetes_pod_v1" "terraform" {
   }
 }
 
+# The Teleport provider joins as soon as it is configured, i.e. at plan
+# time: run.sh first applies this token (and with it Teleport) with -target,
+# then everything else. Teleport resources depend on it too, so a destroy
+# removes them before Teleport itself.
 resource "kubernetes_token_request_v1" "terraform" {
+  depends_on = [helm_release.teleport, kubernetes_service_v1.teleport_auth_external]
+
   metadata {
     name      = kubernetes_service_account_v1.terraform.metadata[0].name
     namespace = kubernetes_namespace_v1.teleport.metadata[0].name
@@ -164,15 +170,4 @@ resource "kubernetes_token_request_v1" "terraform" {
       uid         = kubernetes_pod_v1.terraform.metadata[0].uid
     }
   }
-}
-
-# The Teleport provider joins as soon as it is configured, i.e. at plan
-# time: run.sh first applies this file (and with it Teleport) with -target,
-# then everything else. Teleport resources depend on it too, so a destroy
-# removes them before Teleport itself.
-resource "local_sensitive_file" "terraform_token" {
-  content  = kubernetes_token_request_v1.terraform.token
-  filename = var.kubernetes_token_path
-
-  depends_on = [helm_release.teleport, kubernetes_service_v1.teleport_auth_external]
 }

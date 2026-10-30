@@ -22,10 +22,6 @@ terraform {
       source  = "hashicorp/http"
       version = "~> 3.6"
     }
-    local = {
-      source  = "hashicorp/local"
-      version = "~> 2.9"
-    }
     teleport = {
       source  = "terraform.releases.teleport.dev/gravitational/teleport"
       version = "18.10.0"
