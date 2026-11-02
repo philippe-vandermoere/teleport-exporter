@@ -137,16 +137,20 @@ for node in ssh-node-1 ssh-node-2; do
         || fail "missing node_cluster_info for $node"
 done
 for kube in k3s-1 k3s-2; do
-    metrics | grep -qF "teleport_exporter_kubernetes_cluster_info{$c,kube_cluster_name=\"$kube\"} 1" \
+    metrics | grep -qE "^teleport_exporter_kubernetes_cluster_info\{$c,kube_cluster_name=\"$kube\",node_name=\"[0-9a-f-]{36}\",version=\"$teleport_version\"\} 1$" \
         || fail "missing kubernetes_cluster_info for $kube"
 done
-metrics | grep -qF "teleport_exporter_app_cluster_info{app_name=\"grafana\",$c,public_addr=\"grafana.teleport.test\",uri=\"http://grafana.e2e.test:3000\"} 1" \
+# The apps and databases are served by ssh-node-1 (see teleport_ssh_nodes.tf):
+# their node_name must be that node's UUID.
+ssh_node_1=$(metrics | grep -oE "^teleport_exporter_node_cluster_info\{[^}]*hostname=\"ssh-node-1\",node_name=\"[0-9a-f-]{36}\"" | grep -oE '[0-9a-f-]{36}')
+[ -n "$ssh_node_1" ] || fail "could not read ssh-node-1's UUID from node_cluster_info"
+metrics | grep -qF "teleport_exporter_app_cluster_info{app_name=\"grafana\",$c,node_name=\"$ssh_node_1\",public_addr=\"grafana.teleport.test\",uri=\"http://grafana.e2e.test:3000\",version=\"$teleport_version\"} 1" \
     || fail "missing app_cluster_info for grafana"
-metrics | grep -qF "teleport_exporter_app_cluster_info{app_name=\"prometheus\",$c,public_addr=\"prometheus.teleport.test\",uri=\"http://prometheus.e2e.test:9090\"} 1" \
+metrics | grep -qF "teleport_exporter_app_cluster_info{app_name=\"prometheus\",$c,node_name=\"$ssh_node_1\",public_addr=\"prometheus.teleport.test\",uri=\"http://prometheus.e2e.test:9090\",version=\"$teleport_version\"} 1" \
     || fail "missing app_cluster_info for prometheus"
-metrics | grep -qF "teleport_exporter_database_cluster_info{$c,database_name=\"postgres\",protocol=\"postgres\",type=\"self-hosted\"} 1" \
+metrics | grep -qF "teleport_exporter_database_cluster_info{$c,database_name=\"postgres\",node_name=\"$ssh_node_1\",protocol=\"postgres\",type=\"self-hosted\",version=\"$teleport_version\"} 1" \
     || fail "missing database_cluster_info for postgres"
-metrics | grep -qF "teleport_exporter_database_cluster_info{$c,database_name=\"mysql\",protocol=\"mysql\",type=\"self-hosted\"} 1" \
+metrics | grep -qF "teleport_exporter_database_cluster_info{$c,database_name=\"mysql\",node_name=\"$ssh_node_1\",protocol=\"mysql\",type=\"self-hosted\",version=\"$teleport_version\"} 1" \
     || fail "missing database_cluster_info for mysql"
 echo "ok"
 

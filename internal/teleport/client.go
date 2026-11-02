@@ -20,9 +20,17 @@ type Node struct {
 	Version  string
 }
 
+// Agent is a Teleport agent serving a Kubernetes cluster, database or
+// application.
+type Agent struct {
+	NodeName string // UUID
+	Version  string
+}
+
 // KubeCluster is a Kubernetes cluster registered in Teleport.
 type KubeCluster struct {
-	Name string
+	Name   string
+	Agents []Agent
 }
 
 // Database is a database registered in Teleport.
@@ -30,6 +38,7 @@ type Database struct {
 	Name     string
 	Protocol string
 	Type     string
+	Agents   []Agent
 }
 
 // App is an application registered in Teleport.
@@ -37,11 +46,13 @@ type App struct {
 	Name       string
 	PublicAddr string
 	URI        string
+	Agents     []Agent
 }
 
 // Inventory is everything one collection fetches from a Teleport cluster.
 // Kubernetes clusters, databases and apps are deduplicated by name: several
-// agents may serve the same resource (HA), each with its own server entry.
+// agents may serve the same resource (HA), each with its own server entry,
+// listed in the resource's Agents.
 type Inventory struct {
 	ClusterName  string
 	Nodes        []Node
@@ -106,45 +117,69 @@ func (c *Client) Fetch(ctx context.Context) (Inventory, error) {
 	if err != nil {
 		return Inventory{}, fmt.Errorf("listing kubernetes servers: %w", err)
 	}
-	seen := make(map[string]bool)
+	index := make(map[string]int)
 	for _, s := range kubeServers {
 		kc := s.GetCluster()
-		if kc == nil || seen[kc.GetName()] {
+		if kc == nil {
 			continue
 		}
-		seen[kc.GetName()] = true
-		inv.KubeClusters = append(inv.KubeClusters, KubeCluster{Name: kc.GetName()})
+		i, ok := index[kc.GetName()]
+		if !ok {
+			i = len(inv.KubeClusters)
+			index[kc.GetName()] = i
+			inv.KubeClusters = append(inv.KubeClusters, KubeCluster{Name: kc.GetName()})
+		}
+		inv.KubeClusters[i].Agents = append(inv.KubeClusters[i].Agents, agentOf(s))
 	}
 
 	dbServers, err := clt.GetDatabaseServers(ctx, defaults.Namespace)
 	if err != nil {
 		return Inventory{}, fmt.Errorf("listing database servers: %w", err)
 	}
-	seen = make(map[string]bool)
+	index = make(map[string]int)
 	for _, s := range dbServers {
 		db := s.GetDatabase()
-		if db == nil || seen[db.GetName()] {
+		if db == nil {
 			continue
 		}
-		seen[db.GetName()] = true
-		inv.Databases = append(inv.Databases, Database{Name: db.GetName(), Protocol: db.GetProtocol(), Type: db.GetType()})
+		i, ok := index[db.GetName()]
+		if !ok {
+			i = len(inv.Databases)
+			index[db.GetName()] = i
+			inv.Databases = append(inv.Databases, Database{Name: db.GetName(), Protocol: db.GetProtocol(), Type: db.GetType()})
+		}
+		inv.Databases[i].Agents = append(inv.Databases[i].Agents, agentOf(s))
 	}
 
 	appServers, err := clt.GetApplicationServers(ctx, defaults.Namespace)
 	if err != nil {
 		return Inventory{}, fmt.Errorf("listing application servers: %w", err)
 	}
-	seen = make(map[string]bool)
+	index = make(map[string]int)
 	for _, s := range appServers {
 		app := s.GetApp()
-		if app == nil || seen[app.GetName()] {
+		if app == nil {
 			continue
 		}
-		seen[app.GetName()] = true
-		inv.Apps = append(inv.Apps, App{Name: app.GetName(), PublicAddr: app.GetPublicAddr(), URI: app.GetURI()})
+		i, ok := index[app.GetName()]
+		if !ok {
+			i = len(inv.Apps)
+			index[app.GetName()] = i
+			inv.Apps = append(inv.Apps, App{Name: app.GetName(), PublicAddr: app.GetPublicAddr(), URI: app.GetURI()})
+		}
+		inv.Apps[i].Agents = append(inv.Apps[i].Agents, agentOf(s))
 	}
 
 	return inv, nil
+}
+
+// agentOf returns the agent behind a Kubernetes, database or application
+// server entry.
+func agentOf(s interface {
+	GetHostID() string
+	GetTeleportVersion() string
+}) Agent {
+	return Agent{NodeName: s.GetHostID(), Version: s.GetTeleportVersion()}
 }
 
 // connect returns the API client, dialing it first if needed, with the
