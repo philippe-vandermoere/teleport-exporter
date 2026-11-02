@@ -30,20 +30,22 @@ the Helm chart under `charts/teleport-exporter/`).
 | `teleport_exporter_nodes_total` | gauge | `cluster_name` | SSH nodes registered in Teleport. |
 | `teleport_exporter_node_cluster_info` | gauge | `cluster_name`, `node_name`, `hostname`, `address`, `version` | Always 1, one series per SSH node. `node_name` is the node's UUID, `version` its Teleport version. `address` is empty for nodes connected through a reverse tunnel (the default when a node joins via the proxy). |
 | `teleport_exporter_kubernetes_clusters_total` | gauge | `cluster_name` | Kubernetes clusters registered in Teleport. |
-| `teleport_exporter_kubernetes_cluster_info` | gauge | `cluster_name`, `kube_cluster_name` | Always 1, one series per Kubernetes cluster. |
+| `teleport_exporter_kubernetes_cluster_info` | gauge | `cluster_name`, `kube_cluster_name`, `node_name`, `version` | Always 1, one series per Kubernetes cluster and agent serving it. `node_name` is the agent's UUID, `version` its Teleport version. |
 | `teleport_exporter_databases_total` | gauge | `cluster_name` | Databases registered in Teleport. |
 | `teleport_exporter_databases_by_protocol_total` | gauge | `cluster_name`, `protocol` | Databases by protocol (`postgres`, `mysql`, ...). |
 | `teleport_exporter_databases_by_type_total` | gauge | `cluster_name`, `type` | Databases by type (`self-hosted`, `rds`, ...). |
-| `teleport_exporter_database_cluster_info` | gauge | `cluster_name`, `database_name`, `protocol`, `type` | Always 1, one series per database. |
+| `teleport_exporter_database_cluster_info` | gauge | `cluster_name`, `database_name`, `protocol`, `type`, `node_name`, `version` | Always 1, one series per database and agent serving it (same `node_name`/`version` as above). |
 | `teleport_exporter_apps_total` | gauge | `cluster_name` | Applications registered in Teleport. |
-| `teleport_exporter_app_cluster_info` | gauge | `cluster_name`, `app_name`, `public_addr`, `uri` | Always 1, one series per application. |
+| `teleport_exporter_app_cluster_info` | gauge | `cluster_name`, `app_name`, `public_addr`, `uri`, `node_name`, `version` | Always 1, one series per application and agent serving it (same `node_name`/`version` as above). |
 | `teleport_exporter_collect_duration_seconds` | gauge | `cluster_name` | Duration of the last collection, including failed ones. Absent before the first one. |
 | `teleport_exporter_collect_errors_total` | counter | `cluster_name` | Failed collections since the exporter started. |
 | `teleport_exporter_last_successful_collect_timestamp_seconds` | gauge | `cluster_name` | Unix timestamp of the last successful collection. Absent until there is one. |
 
 Kubernetes clusters, databases and applications served by several agents
-(high availability) are counted once, by name. The resource metrics are
-absent until the first successful collection.
+(high availability) are counted once, by name, in the `*_total` metrics,
+but get one `*_cluster_info` series per agent: e.g. agents left on an older
+Teleport version during an upgrade show up as their own series. The
+resource metrics are absent until the first successful collection.
 
 Until Teleport has reported its cluster name once (i.e. before the first
 successful collection), the three `collect_*` health metrics use the host
@@ -64,6 +66,7 @@ Suggested alerting (not shipped with this repository):
 - Exporter can't reach Teleport: `teleport_exporter_up == 0` for 5 minutes.
 - Stale data: `time() - teleport_exporter_last_successful_collect_timestamp_seconds > 600`.
 - A resource disappeared: `absent_over_time(teleport_exporter_kubernetes_cluster_info{kube_cluster_name="prod"}[10m])`.
+- An agent lagging behind: `count by (version) (teleport_exporter_kubernetes_cluster_info)` (or `node_cluster_info`, `database_cluster_info`, `app_cluster_info`) shows more than one version.
 
 ## Configuration
 

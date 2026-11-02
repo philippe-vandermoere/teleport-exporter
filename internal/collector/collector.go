@@ -40,8 +40,8 @@ var (
 	)
 	kubeClusterInfoDesc = prometheus.NewDesc(
 		namespace+"_kubernetes_cluster_info",
-		"Always 1; one series per Kubernetes cluster registered in Teleport.",
-		[]string{"cluster_name", "kube_cluster_name"}, nil,
+		"Always 1; one series per Kubernetes cluster registered in Teleport and agent serving it.",
+		[]string{"cluster_name", "kube_cluster_name", "node_name", "version"}, nil,
 	)
 	databasesTotalDesc = prometheus.NewDesc(
 		namespace+"_databases_total",
@@ -60,8 +60,8 @@ var (
 	)
 	databaseClusterInfoDesc = prometheus.NewDesc(
 		namespace+"_database_cluster_info",
-		"Always 1; carries descriptive info about a database registered in Teleport as labels.",
-		[]string{"cluster_name", "database_name", "protocol", "type"}, nil,
+		"Always 1; carries descriptive info about a database registered in Teleport and an agent serving it as labels.",
+		[]string{"cluster_name", "database_name", "protocol", "type", "node_name", "version"}, nil,
 	)
 	appsTotalDesc = prometheus.NewDesc(
 		namespace+"_apps_total",
@@ -70,8 +70,8 @@ var (
 	)
 	appClusterInfoDesc = prometheus.NewDesc(
 		namespace+"_app_cluster_info",
-		"Always 1; carries descriptive info about an application registered in Teleport as labels.",
-		[]string{"cluster_name", "app_name", "public_addr", "uri"}, nil,
+		"Always 1; carries descriptive info about an application registered in Teleport and an agent serving it as labels.",
+		[]string{"cluster_name", "app_name", "public_addr", "uri", "node_name", "version"}, nil,
 	)
 	collectDurationDesc = prometheus.NewDesc(
 		namespace+"_collect_duration_seconds",
@@ -231,7 +231,9 @@ func collectInventory(ch chan<- prometheus.Metric, inv *teleport.Inventory) {
 
 	ch <- prometheus.MustNewConstMetric(kubeClustersTotalDesc, prometheus.GaugeValue, float64(len(inv.KubeClusters)), cluster)
 	for _, k := range inv.KubeClusters {
-		ch <- prometheus.MustNewConstMetric(kubeClusterInfoDesc, prometheus.GaugeValue, 1, cluster, k.Name)
+		for _, a := range k.Agents {
+			ch <- prometheus.MustNewConstMetric(kubeClusterInfoDesc, prometheus.GaugeValue, 1, cluster, k.Name, a.NodeName, a.Version)
+		}
 	}
 
 	ch <- prometheus.MustNewConstMetric(databasesTotalDesc, prometheus.GaugeValue, float64(len(inv.Databases)), cluster)
@@ -240,7 +242,9 @@ func collectInventory(ch chan<- prometheus.Metric, inv *teleport.Inventory) {
 	for _, db := range inv.Databases {
 		byProtocol[db.Protocol]++
 		byType[db.Type]++
-		ch <- prometheus.MustNewConstMetric(databaseClusterInfoDesc, prometheus.GaugeValue, 1, cluster, db.Name, db.Protocol, db.Type)
+		for _, a := range db.Agents {
+			ch <- prometheus.MustNewConstMetric(databaseClusterInfoDesc, prometheus.GaugeValue, 1, cluster, db.Name, db.Protocol, db.Type, a.NodeName, a.Version)
+		}
 	}
 	for protocol, n := range byProtocol {
 		ch <- prometheus.MustNewConstMetric(databasesByProtocolDesc, prometheus.GaugeValue, float64(n), cluster, protocol)
@@ -250,7 +254,9 @@ func collectInventory(ch chan<- prometheus.Metric, inv *teleport.Inventory) {
 	}
 
 	ch <- prometheus.MustNewConstMetric(appsTotalDesc, prometheus.GaugeValue, float64(len(inv.Apps)), cluster)
-	for _, a := range inv.Apps {
-		ch <- prometheus.MustNewConstMetric(appClusterInfoDesc, prometheus.GaugeValue, 1, cluster, a.Name, a.PublicAddr, a.URI)
+	for _, app := range inv.Apps {
+		for _, a := range app.Agents {
+			ch <- prometheus.MustNewConstMetric(appClusterInfoDesc, prometheus.GaugeValue, 1, cluster, app.Name, app.PublicAddr, app.URI, a.NodeName, a.Version)
+		}
 	}
 }

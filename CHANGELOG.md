@@ -10,6 +10,18 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `teleport_exporter_kubernetes_cluster_info`,
+  `teleport_exporter_database_cluster_info` and
+  `teleport_exporter_app_cluster_info` gain `node_name` (the serving
+  agent's UUID) and `version` (its Teleport version) labels, and now have
+  one series per resource **and agent** instead of one per resource: a
+  resource served by several agents (HA) gets one series per agent. The
+  `*_total` metrics still count each resource once. Queries that assumed a
+  single series per resource (e.g. `count(…_cluster_info)`) must aggregate
+  by the resource name label instead.
+
 ## [0.1.0] - 2026-10-29
 
 ### Added

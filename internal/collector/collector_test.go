@@ -29,13 +29,20 @@ var testInventory = teleport.Inventory{
 		{Name: "uuid-1", Hostname: "ssh-node-1", Address: "10.0.0.1:3022", Version: "18.10.0"},
 		{Name: "uuid-2", Hostname: "ssh-node-2", Address: "10.0.0.2:3022", Version: "18.10.0"},
 	},
-	KubeClusters: []teleport.KubeCluster{{Name: "k3s-1"}, {Name: "k3s-2"}},
-	Databases: []teleport.Database{
-		{Name: "pg-1", Protocol: "postgres", Type: "self-hosted"},
-		{Name: "pg-2", Protocol: "postgres", Type: "rds"},
-		{Name: "mysql-1", Protocol: "mysql", Type: "self-hosted"},
+	// k3s-1 and pg-1 are served by two agents (HA), one of them mid-upgrade:
+	// one info series per agent, but each resource counted once.
+	KubeClusters: []teleport.KubeCluster{
+		{Name: "k3s-1", Agents: []teleport.Agent{{NodeName: "uuid-3", Version: "18.10.0"}, {NodeName: "uuid-4", Version: "18.9.2"}}},
+		{Name: "k3s-2", Agents: []teleport.Agent{{NodeName: "uuid-5", Version: "18.10.0"}}},
 	},
-	Apps: []teleport.App{{Name: "grafana", PublicAddr: "grafana.teleport.example.com", URI: "http://grafana:3000"}},
+	Databases: []teleport.Database{
+		{Name: "pg-1", Protocol: "postgres", Type: "self-hosted", Agents: []teleport.Agent{{NodeName: "uuid-6", Version: "18.10.0"}, {NodeName: "uuid-7", Version: "18.10.0"}}},
+		{Name: "pg-2", Protocol: "postgres", Type: "rds", Agents: []teleport.Agent{{NodeName: "uuid-6", Version: "18.10.0"}}},
+		{Name: "mysql-1", Protocol: "mysql", Type: "self-hosted", Agents: []teleport.Agent{{NodeName: "uuid-6", Version: "18.10.0"}}},
+	},
+	Apps: []teleport.App{
+		{Name: "grafana", PublicAddr: "grafana.teleport.example.com", URI: "http://grafana:3000", Agents: []teleport.Agent{{NodeName: "uuid-8", Version: "18.10.0"}}},
+	},
 }
 
 func newTestCollector(src Source) *Collector {
@@ -43,17 +50,18 @@ func newTestCollector(src Source) *Collector {
 }
 
 const inventoryMetrics = `
-# HELP teleport_exporter_app_cluster_info Always 1; carries descriptive info about an application registered in Teleport as labels.
+# HELP teleport_exporter_app_cluster_info Always 1; carries descriptive info about an application registered in Teleport and an agent serving it as labels.
 # TYPE teleport_exporter_app_cluster_info gauge
-teleport_exporter_app_cluster_info{app_name="grafana",cluster_name="teleport.example.com",public_addr="grafana.teleport.example.com",uri="http://grafana:3000"} 1
+teleport_exporter_app_cluster_info{app_name="grafana",cluster_name="teleport.example.com",node_name="uuid-8",public_addr="grafana.teleport.example.com",uri="http://grafana:3000",version="18.10.0"} 1
 # HELP teleport_exporter_apps_total Number of applications registered in Teleport.
 # TYPE teleport_exporter_apps_total gauge
 teleport_exporter_apps_total{cluster_name="teleport.example.com"} 1
-# HELP teleport_exporter_database_cluster_info Always 1; carries descriptive info about a database registered in Teleport as labels.
+# HELP teleport_exporter_database_cluster_info Always 1; carries descriptive info about a database registered in Teleport and an agent serving it as labels.
 # TYPE teleport_exporter_database_cluster_info gauge
-teleport_exporter_database_cluster_info{cluster_name="teleport.example.com",database_name="mysql-1",protocol="mysql",type="self-hosted"} 1
-teleport_exporter_database_cluster_info{cluster_name="teleport.example.com",database_name="pg-1",protocol="postgres",type="self-hosted"} 1
-teleport_exporter_database_cluster_info{cluster_name="teleport.example.com",database_name="pg-2",protocol="postgres",type="rds"} 1
+teleport_exporter_database_cluster_info{cluster_name="teleport.example.com",database_name="mysql-1",node_name="uuid-6",protocol="mysql",type="self-hosted",version="18.10.0"} 1
+teleport_exporter_database_cluster_info{cluster_name="teleport.example.com",database_name="pg-1",node_name="uuid-6",protocol="postgres",type="self-hosted",version="18.10.0"} 1
+teleport_exporter_database_cluster_info{cluster_name="teleport.example.com",database_name="pg-1",node_name="uuid-7",protocol="postgres",type="self-hosted",version="18.10.0"} 1
+teleport_exporter_database_cluster_info{cluster_name="teleport.example.com",database_name="pg-2",node_name="uuid-6",protocol="postgres",type="rds",version="18.10.0"} 1
 # HELP teleport_exporter_databases_by_protocol_total Number of databases registered in Teleport, by protocol.
 # TYPE teleport_exporter_databases_by_protocol_total gauge
 teleport_exporter_databases_by_protocol_total{cluster_name="teleport.example.com",protocol="mysql"} 1
@@ -65,10 +73,11 @@ teleport_exporter_databases_by_type_total{cluster_name="teleport.example.com",ty
 # HELP teleport_exporter_databases_total Number of databases registered in Teleport.
 # TYPE teleport_exporter_databases_total gauge
 teleport_exporter_databases_total{cluster_name="teleport.example.com"} 3
-# HELP teleport_exporter_kubernetes_cluster_info Always 1; one series per Kubernetes cluster registered in Teleport.
+# HELP teleport_exporter_kubernetes_cluster_info Always 1; one series per Kubernetes cluster registered in Teleport and agent serving it.
 # TYPE teleport_exporter_kubernetes_cluster_info gauge
-teleport_exporter_kubernetes_cluster_info{cluster_name="teleport.example.com",kube_cluster_name="k3s-1"} 1
-teleport_exporter_kubernetes_cluster_info{cluster_name="teleport.example.com",kube_cluster_name="k3s-2"} 1
+teleport_exporter_kubernetes_cluster_info{cluster_name="teleport.example.com",kube_cluster_name="k3s-1",node_name="uuid-3",version="18.10.0"} 1
+teleport_exporter_kubernetes_cluster_info{cluster_name="teleport.example.com",kube_cluster_name="k3s-1",node_name="uuid-4",version="18.9.2"} 1
+teleport_exporter_kubernetes_cluster_info{cluster_name="teleport.example.com",kube_cluster_name="k3s-2",node_name="uuid-5",version="18.10.0"} 1
 # HELP teleport_exporter_kubernetes_clusters_total Number of Kubernetes clusters registered in Teleport.
 # TYPE teleport_exporter_kubernetes_clusters_total gauge
 teleport_exporter_kubernetes_clusters_total{cluster_name="teleport.example.com"} 2
