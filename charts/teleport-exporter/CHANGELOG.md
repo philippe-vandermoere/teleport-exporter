@@ -11,6 +11,15 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-02
+
+### Changed
+
+- Bumped `appVersion` to 0.2.0 — see the exporter changelog.
+  `kubernetes_cluster_info`, `database_cluster_info` and `app_cluster_info`
+  gain `node_name` and `version` labels, with one series per resource and
+  serving agent.
+
 ## [0.1.0] - 2026-10-29
 
 ### Added
@@ -23,5 +32,6 @@ and this project uses [Semantic Versioning](https://semver.org/).
   `identity.existingSecret` as an alternative to tbot, Service, optional
   Prometheus Operator `ServiceMonitor`.
 
-[Unreleased]: https://github.com/philippe-vandermoere/teleport-exporter/compare/chart-v0.1.0...HEAD
+[Unreleased]: https://github.com/philippe-vandermoere/teleport-exporter/compare/chart-v0.2.0...HEAD
+[0.2.0]: https://github.com/philippe-vandermoere/teleport-exporter/compare/chart-v0.1.0...chart-v0.2.0
 [0.1.0]: https://github.com/philippe-vandermoere/teleport-exporter/releases/tag/chart-v0.1.0

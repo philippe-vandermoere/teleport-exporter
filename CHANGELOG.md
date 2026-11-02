@@ -10,6 +10,8 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-02
+
 ### Changed
 
 - `teleport_exporter_kubernetes_cluster_info`,
@@ -37,5 +39,6 @@ and this project uses [Semantic Versioning](https://semver.org/).
   `last_successful_collect_timestamp_seconds`, all prefixed
   `teleport_exporter_`.
 
-[Unreleased]: https://github.com/philippe-vandermoere/teleport-exporter/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/philippe-vandermoere/teleport-exporter/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/philippe-vandermoere/teleport-exporter/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/philippe-vandermoere/teleport-exporter/releases/tag/v0.1.0
